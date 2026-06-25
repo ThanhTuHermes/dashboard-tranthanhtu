@@ -169,7 +169,57 @@ body{background:#080c14;color:#e2e8f0;min-height:100vh}
       </div>
     </div>
     <div class="p-4 space-y-3" id="svc-metrics-content">
-      <div class="text-xs text-slate-500">Đang tải chỉ số dịch vụ...</div>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div class="bg-slate-800/50 rounded-lg p-3">
+          <div class="text-[10px] text-slate-500 uppercase">Độ Trễ</div>
+          <div id="metric-latency" class="text-lg font-bold mono text-slate-400">—</div>
+        </div>
+        <div class="bg-slate-800/50 rounded-lg p-3">
+          <div class="text-[10px] text-slate-500 uppercase">Lỗi (5 phút)</div>
+          <div id="metric-errors" class="text-lg font-bold mono text-slate-400">—</div>
+        </div>
+        <div class="bg-slate-800/50 rounded-lg p-3">
+          <div class="text-[10px] text-slate-500 uppercase">Cảnh Báo (5 phút)</div>
+          <div id="metric-warnings" class="text-lg font-bold mono text-slate-400">—</div>
+        </div>
+        <div class="bg-slate-800/50 rounded-lg p-3">
+          <div class="text-[10px] text-slate-500 uppercase">Bộ Nhớ</div>
+          <div id="metric-memory" class="text-lg font-bold mono text-cyan-400">—</div>
+        </div>
+        <div class="bg-slate-800/50 rounded-lg p-3">
+          <div class="text-[10px] text-slate-500 uppercase">Yêu Cầu (5 phút)</div>
+          <div id="metric-requests" class="text-lg font-bold mono text-slate-200">—</div>
+        </div>
+        <div class="bg-slate-800/50 rounded-lg p-3">
+          <div class="text-[10px] text-slate-500 uppercase">Khởi Động Lại (24h)</div>
+          <div id="metric-restarts" class="text-lg font-bold mono text-slate-400">—</div>
+        </div>
+        <div class="bg-slate-800/50 rounded-lg p-3">
+          <div class="text-[10px] text-slate-500 uppercase">Tiến Trình Con</div>
+          <div id="metric-child-procs" class="text-lg font-bold mono text-slate-200">—</div>
+        </div>
+        <div class="bg-slate-800/50 rounded-lg p-3">
+          <div class="text-[10px] text-slate-500 uppercase">Thời Gian Chạy</div>
+          <div id="metric-uptime" class="text-lg font-bold mono text-emerald-400 text-xs">—</div>
+        </div>
+      </div>
+      <div id="metric-providers-container" class="mt-2 min-h-[36px] flex flex-col justify-center">
+        <div class="flex gap-2 flex-wrap" id="metric-providers-list"></div>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+        <div class="overflow-hidden">
+          <div class="text-[10px] text-slate-500 uppercase mb-1">Thời Gian Phản Hồi (ms)</div>
+          <div class="relative h-32">
+            <canvas id="chart-svc-rt"></canvas>
+          </div>
+        </div>
+        <div class="overflow-hidden">
+          <div class="text-[10px] text-slate-500 uppercase mb-1">Bộ Nhớ (MB)</div>
+          <div class="relative h-32">
+            <canvas id="chart-svc-mem"></canvas>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -359,108 +409,86 @@ async function fetchSvcMetrics() {
 
 function renderSvcMetrics(key) {
   const d = svcMetricHistories[key];
-  const el = document.getElementById('svc-metrics-content');
-  if (!d) { el.innerHTML = '<div class="text-xs text-slate-500">Không có dữ liệu</div>'; return; }
-
-  const hist = d.history || {};
-  const rtSeries = (hist.response_times || []).map(p => ({ t: p.t, v: p.value }));
-  const memSeries = (hist.memory_samples || []).map(p => ({ t: p.t, v: p.value }));
+  if (!d) return;
 
   const rtClass = d.response_time_ms != null && d.response_time_ms < 200 ? 'text-emerald-400' : 'text-amber-400';
   const errClass = d.error_count_5min === 0 ? 'text-emerald-400' : 'text-red-400';
   const warnClass = d.warning_count_5min === 0 ? 'text-emerald-400' : 'text-amber-400';
   const restartClass = d.restart_count_24h === 0 ? 'text-emerald-400' : 'text-red-400';
 
-  el.innerHTML = `
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-      <div class="bg-slate-800/50 rounded-lg p-3">
-        <div class="text-[10px] text-slate-500 uppercase">Độ Trễ</div>
-        <div class="text-lg font-bold mono ${rtClass}">${d.response_time_ms != null ? d.response_time_ms + ' ms' : '—'}</div>
-      </div>
-      <div class="bg-slate-800/50 rounded-lg p-3">
-        <div class="text-[10px] text-slate-500 uppercase">Lỗi (5 phút)</div>
-        <div class="text-lg font-bold mono ${errClass}">${d.error_count_5min}</div>
-      </div>
-      <div class="bg-slate-800/50 rounded-lg p-3">
-        <div class="text-[10px] text-slate-500 uppercase">Cảnh Báo (5 phút)</div>
-        <div class="text-lg font-bold mono ${warnClass}">${d.warning_count_5min}</div>
-      </div>
-      <div class="bg-slate-800/50 rounded-lg p-3">
-        <div class="text-[10px] text-slate-500 uppercase">Bộ Nhớ</div>
-        <div class="text-lg font-bold mono text-cyan-400">${d.memory_mb != null ? d.memory_mb + ' MB' : '—'}</div>
-      </div>
-      <div class="bg-slate-800/50 rounded-lg p-3">
-        <div class="text-[10px] text-slate-500 uppercase">Yêu Cầu (5 phút)</div>
-        <div class="text-lg font-bold mono text-slate-200">${d.request_count_5min}</div>
-      </div>
-      <div class="bg-slate-800/50 rounded-lg p-3">
-        <div class="text-[10px] text-slate-500 uppercase">Khởi Động Lại (24h)</div>
-        <div class="text-lg font-bold mono ${restartClass}">${d.restart_count_24h}</div>
-      </div>
-      <div class="bg-slate-800/50 rounded-lg p-3">
-        <div class="text-[10px] text-slate-500 uppercase">Tiến Trình Con</div>
-        <div class="text-lg font-bold mono text-slate-200">${d.child_process_count}</div>
-      </div>
-      <div class="bg-slate-800/50 rounded-lg p-3">
-        <div class="text-[10px] text-slate-500 uppercase">Thời Gian Chạy</div>
-        <div class="text-lg font-bold mono text-emerald-400 text-xs">${d.uptime || '—'}</div>
-      </div>
-    </div>
-    ${d.active_providers && d.active_providers.length > 0 ? `
-    <div class="mt-2">
-      <span class="text-[10px] text-slate-500 uppercase">Nhà Cung Cấp Đang Dùng:</span>
-      <div class="flex gap-2 mt-1 flex-wrap">
-        ${d.active_providers.map(p => `<span class="badge bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">${esc(p)}</span>`).join('')}
-      </div>
-    </div>` : ''}
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
-      <div>
-        <div class="text-[10px] text-slate-500 uppercase mb-1">Thời Gian Phản Hồi (ms)</div>
-        <div class="relative h-28">
-          <canvas id="chart-svc-rt"></canvas>
-        </div>
-      </div>
-      <div>
-        <div class="text-[10px] text-slate-500 uppercase mb-1">Bộ Nhớ (MB)</div>
-        <div class="relative h-28">
-          <canvas id="chart-svc-mem"></canvas>
-        </div>
-      </div>
-    </div>`;
+  document.getElementById('metric-latency').textContent = d.response_time_ms != null ? d.response_time_ms + ' ms' : '—';
+  document.getElementById('metric-latency').className = `text-lg font-bold mono ${rtClass}`;
 
-  // Vẽ biểu đồ
-  renderSvcChart('chart-svc-rt', rtSeries, '#22d3ee', 'ms');
-  renderSvcChart('chart-svc-mem', memSeries, '#a78bfa', 'MB');
+  document.getElementById('metric-errors').textContent = d.error_count_5min;
+  document.getElementById('metric-errors').className = `text-lg font-bold mono ${errClass}`;
+
+  document.getElementById('metric-warnings').textContent = d.warning_count_5min;
+  document.getElementById('metric-warnings').className = `text-lg font-bold mono ${warnClass}`;
+
+  document.getElementById('metric-memory').textContent = d.memory_mb != null ? d.memory_mb + ' MB' : '—';
+  document.getElementById('metric-memory').className = `text-lg font-bold mono text-cyan-400`;
+
+  document.getElementById('metric-requests').textContent = d.request_count_5min;
+  document.getElementById('metric-restarts').textContent = d.restart_count_24h;
+  document.getElementById('metric-restarts').className = `text-lg font-bold mono ${restartClass}`;
+
+  document.getElementById('metric-child-procs').textContent = d.child_process_count;
+  document.getElementById('metric-uptime').textContent = d.uptime || '—';
+
+  // Providers list
+  const providersList = document.getElementById('metric-providers-list');
+  if (d.active_providers && d.active_providers.length > 0) {
+    providersList.innerHTML = `<span class="text-[10px] text-slate-500 uppercase mr-1">Nhà Cung Cấp Đang Dùng:</span>` + 
+      d.active_providers.map(p => `<span class="badge bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">${esc(p)}</span>`).join('');
+  } else {
+    providersList.innerHTML = '';
+  }
+
+  // Cập nhật biểu đồ mà không rebuild canvas
+  const hist = d.history || {};
+  const rtSeries = (hist.response_times || []).map(p => ({ t: p.t, v: p.value }));
+  const memSeries = (hist.memory_samples || []).map(p => ({ t: p.t, v: p.value }));
+
+  updateSvcChart('chart-svc-rt', rtSeries, '#22d3ee', 'ms');
+  updateSvcChart('chart-svc-mem', memSeries, '#a78bfa', 'MB');
 }
 
-function renderSvcChart(canvasId, series, color, unit) {
+function updateSvcChart(canvasId, series, color, unit) {
   const ctx = document.getElementById(canvasId);
   if (!ctx) return;
-  const chart = svcMetricCharts[canvasId];
-  if (chart) chart.destroy();
+
   const labels = series.map(p => { const d = new Date(p.t * 1000); return d.toTimeString().slice(0, 8); });
-  svcMetricCharts[canvasId] = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels,
-      datasets: [{
-        label: color === '#22d3ee' ? 'Độ Trễ' : 'Bộ Nhớ',
-        data: series.map(p => p.v),
-        borderColor: color,
-        backgroundColor: color + '10',
-        fill: true, tension: 0.3, pointRadius: 0, borderWidth: 1.5
-      }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { display: false },
-        y: { min: 0, grid: { color: 'rgba(255,255,255,0.03)' }, ticks: { color: '#475569', font: { size: 10 }, callback: v => v + unit } }
+  const data = series.map(p => p.v);
+
+  let chart = svcMetricCharts[canvasId];
+  if (chart) {
+    chart.data.labels = labels;
+    chart.data.datasets[0].data = data;
+    chart.update('none');
+  } else {
+    svcMetricCharts[canvasId] = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          label: color === '#22d3ee' ? 'Độ Trễ' : 'Bộ Nhớ',
+          data: data,
+          borderColor: color,
+          backgroundColor: color + '10',
+          fill: true, tension: 0.3, pointRadius: 0, borderWidth: 1.5
+        }]
       },
-      animation: { duration: 300 }
-    }
-  });
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { display: false },
+          y: { min: 0, grid: { color: 'rgba(255,255,255,0.03)' }, ticks: { color: '#475569', font: { size: 10 }, callback: v => v + unit } }
+        },
+        animation: { duration: 300 }
+      }
+    });
+  }
 }
 
 // Tự cập nhật chỉ số dịch vụ mỗi 30 giây
