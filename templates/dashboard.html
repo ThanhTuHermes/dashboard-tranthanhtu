@@ -28,7 +28,10 @@ body{background:#080c14;color:#e2e8f0;min-height:100vh}
 .log-warn{color:#fbbf24}
 .log-info{color:#60a5fa}
 .log-ok{color:#34d399}
-#chart-canvas{width:100%!important;height:100px!important}
+#chart-canvas{
+  width:100% !important;
+  height:100% !important;
+}
 .fade-in{animation:fadeIn .3s ease}
 @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
 @keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.3}}
@@ -103,7 +106,9 @@ body{background:#080c14;color:#e2e8f0;min-height:100vh}
         <span><span class="inline-block w-2 h-2 rounded-full bg-orange-400 mr-1"></span>Đĩa</span>
       </div>
     </div>
-    <canvas id="chart-canvas"></canvas>
+    <div class="relative h-[220px]">
+      <canvas id="chart-canvas"></canvas>
+    </div>
   </section>
 
   <!-- ═══ BẢNG DỊCH VỤ ═══ -->
@@ -411,11 +416,15 @@ function renderSvcMetrics(key) {
     <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
       <div>
         <div class="text-[10px] text-slate-500 uppercase mb-1">Thời Gian Phản Hồi (ms)</div>
-        <canvas id="chart-svc-rt" height="80"></canvas>
+        <div class="relative h-28">
+          <canvas id="chart-svc-rt"></canvas>
+        </div>
       </div>
       <div>
         <div class="text-[10px] text-slate-500 uppercase mb-1">Bộ Nhớ (MB)</div>
-        <canvas id="chart-svc-mem" height="80"></canvas>
+        <div class="relative h-28">
+          <canvas id="chart-svc-mem"></canvas>
+        </div>
       </div>
     </div>`;
 
@@ -496,7 +505,6 @@ function toggleLog() {
   };
   ws.onmessage = (e) => {
     const line = e.data;
-    while (logOutput.children.length > maxLogLines) logOutput.removeChild(logOutput.firstChild);
     const div = document.createElement('div');
     div.className = 'fade-in';
     const lower = line.toLowerCase();
@@ -506,6 +514,9 @@ function toggleLog() {
     else div.className += ' text-slate-300';
     div.textContent = line;
     logOutput.appendChild(div);
+    while (logOutput.children.length > maxLogLines) {
+      logOutput.removeChild(logOutput.firstChild);
+    }
     logOutput.scrollTop = logOutput.scrollHeight;
   };
   ws.onclose = () => {
