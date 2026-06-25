@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Giám Sát Hệ Thống — tranthanhtu.site</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+*{font-family:'Inter',sans-serif;margin:0;padding:0;box-sizing:border-box}
+body{background:#080c14;color:#e2e8f0;min-height:100vh}
+.mono{font-family:'JetBrains Mono',monospace}
+.card{background:#111827;border:1px solid #1f2937;border-radius:12px}
+.badge{font-size:11px;font-weight:600;padding:3px 10px;border-radius:6px;letter-spacing:.3px}
+.progress-bar{height:6px;border-radius:3px;background:#1e293b;overflow:hidden}
+.progress-fill{height:100%;border-radius:3px;transition:width .6s ease,background .6s ease}
+.btn{font-size:12px;padding:4px 12px;border-radius:6px;border:1px solid #374151;color:#9ca3af;cursor:pointer;background:transparent;transition:all .15s}
+.btn:hover{border-color:#6366f1;color:#818cf8;background:#1e1b4b}
+.btn.loading{opacity:.4;pointer-events:none}
+.btn-active{border-color:#22c55e;color:#22c55e;background:#052e16}
+.table-hover tbody tr:hover{background:#1a2332}
+#log-output{font-size:12px;line-height:1.6;max-height:500px;overflow-y:auto;scroll-behavior:smooth}
+#log-output::-webkit-scrollbar{width:6px}
+#log-output::-webkit-scrollbar-track{background:#0f172a}
+#log-output::-webkit-scrollbar-thumb{background:#334155;border-radius:3px}
+.log-error{color:#f87171}
+.log-warn{color:#fbbf24}
+.log-info{color:#60a5fa}
+.log-ok{color:#34d399}
+#chart-canvas{width:100%!important;height:100px!important}
+.fade-in{animation:fadeIn .3s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.3}}
+.pulse-dot{animation:pulse-dot 2s ease infinite}
+</style>
+</head>
+<body class="p-4 md:p-6">
+<div class="max-w-7xl mx-auto" role="main">
+
+  <!-- ═══ HEADER ═══ -->
+  <header class="flex flex-wrap items-center justify-between mb-5 gap-3">
+    <div>
+      <h1 class="text-xl font-bold text-white tracking-tight flex items-center gap-2">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 pulse-dot"></span> Giám Sát Hệ Thống
+      </h1>
+      <div class="flex items-center gap-3 mt-1">
+        <span class="badge bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">SẢN XUẤT</span>
+        <span class="text-xs text-slate-500" id="last-sync">—</span>
+      </div>
+    </div>
+    <div class="flex items-center gap-3 text-xs">
+      <span class="text-slate-500">Máy chủ: <span class="text-slate-300 mono">vps-tranthanhtu</span></span>
+      <span id="connection-state" class="text-emerald-400 flex items-center gap-1">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span> Trực tuyến
+      </span>
+    </div>
+  </header>
+
+  <!-- ═══ SỨC KHỎE HỆ THỐNG + CHỈ SỐ ═══ -->
+  <section class="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-5">
+    <div class="card p-4 lg:col-span-2" id="health-card">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Sức Khỏe Hệ Thống</h2>
+        <span id="health-badge" class="badge bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">KHỎE</span>
+      </div>
+      <div id="health-alerts" class="space-y-1 text-sm text-slate-400">Tất cả hệ thống hoạt động bình thường</div>
+    </div>
+    <div class="card p-4">
+      <div class="flex justify-between items-start mb-2">
+        <span class="text-xs font-medium text-slate-400 uppercase">CPU</span>
+        <span id="cpu-value" class="text-lg font-bold text-white mono">0%</span>
+      </div>
+      <div class="progress-bar"><div id="cpu-bar" class="progress-fill" style="width:0%"></div></div>
+      <div class="text-[10px] text-slate-500 mt-1" id="cpu-cores"></div>
+      <div id="cpu-per-core" class="grid gap-1 mt-2" style="grid-template-columns:repeat(auto-fit,minmax(80px,1fr))"></div>
+    </div>
+    <div class="card p-4">
+      <div class="flex justify-between items-start mb-2">
+        <span class="text-xs font-medium text-slate-400 uppercase">Bộ Nhớ</span>
+        <span id="mem-value" class="text-lg font-bold text-white mono">0%</span>
+      </div>
+      <div class="progress-bar"><div id="mem-bar" class="progress-fill" style="width:0%"></div></div>
+      <div class="text-[10px] text-slate-500 mt-1" id="mem-detail"></div>
+    </div>
+    <div class="card p-4">
+      <div class="flex justify-between items-start mb-2">
+        <span class="text-xs font-medium text-slate-400 uppercase">Ổ Đĩa</span>
+        <span id="disk-value" class="text-lg font-bold text-white mono">0%</span>
+      </div>
+      <div class="progress-bar"><div id="disk-bar" class="progress-fill" style="width:0%"></div></div>
+      <div class="text-[10px] text-slate-500 mt-1" id="disk-detail"></div>
+    </div>
+  </section>
+
+  <!-- ═══ BIỂU ĐỒ ═══ -->
+  <section class="card p-4 mb-5">
+    <div class="flex items-center justify-between mb-2">
+      <h2 class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Biểu Đồ (3 phút)</h2>
+      <div class="flex gap-4 text-[10px] text-slate-500">
+        <span><span class="inline-block w-2 h-2 rounded-full bg-cyan-400 mr-1"></span>CPU</span>
+        <span><span class="inline-block w-2 h-2 rounded-full bg-purple-400 mr-1"></span>RAM</span>
+        <span><span class="inline-block w-2 h-2 rounded-full bg-orange-400 mr-1"></span>Đĩa</span>
+      </div>
+    </div>
+    <canvas id="chart-canvas"></canvas>
+  </section>
+
+  <!-- ═══ BẢNG DỊCH VỤ ═══ -->
+  <section class="card overflow-hidden mb-5">
+    <div class="p-4 border-b border-slate-800 flex items-center justify-between">
+      <h2 class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Dịch Vụ</h2>
+      <span id="services-count" class="text-xs text-slate-500">0/0 đang chạy</span>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm table-hover">
+        <thead><tr class="text-[10px] text-slate-500 uppercase border-b border-slate-800">
+          <th class="p-3 text-left font-medium">Dịch Vụ</th>
+          <th class="p-3 text-left font-medium">Trạng Thái</th>
+          <th class="p-3 text-left font-medium">Cổng</th>
+          <th class="p-3 text-right font-medium">CPU</th>
+          <th class="p-3 text-right font-medium">RAM</th>
+          <th class="p-3 text-right font-medium">Thời Gian Chạy</th>
+          <th class="p-3 text-center font-medium">Thao Tác</th>
+        </tr></thead>
+        <tbody id="svc-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ═══ NHẬT KÝ ═══ -->
+  <section class="card overflow-hidden mb-5">
+    <div class="p-4 border-b border-slate-800 flex items-center justify-between flex-wrap gap-2">
+      <h2 class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Nhật Ký (Thời Gian Thực)</h2>
+      <div class="flex items-center gap-2 flex-wrap">
+        <select id="log-source" class="bg-slate-800 text-slate-300 text-xs rounded-md border border-slate-700 px-2 py-1 focus:outline-none focus:border-indigo-500">
+          <option value="system">Hệ Thống</option>
+          <option value="dashboard" selected>Dashboard</option>
+          <option value="hermes">Hermes</option>
+          <option value="9router">9Router</option>
+          <option value="openclaw">OpenClaw</option>
+          <option value="cloudflared">Cloudflared</option>
+        </select>
+        <button id="log-connect" class="btn btn-active" onclick="toggleLog()">Kết Nối</button>
+        <button class="btn" onclick="clearLogs()">Xóa</button>
+        <span id="ws-state" class="text-[10px] text-slate-500 mono">ngắt kết nối</span>
+      </div>
+    </div>
+    <div class="px-4 py-3">
+      <div id="log-output" class="bg-slate-950/80 rounded-lg p-3 text-slate-300 mono">
+        <div class="text-slate-500 text-xs">Chọn nguồn nhật ký và nhấn Kết Nối...</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ CHỈ SỐ DỊCH VỤ ═══ -->
+  <section class="card overflow-hidden mb-5">
+    <div class="p-4 border-b border-slate-800 flex items-center justify-between">
+      <h2 class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Chỉ Số Dịch Vụ (Chi Tiết)</h2>
+      <div class="flex gap-2" id="svc-metrics-tabs">
+        <button class="btn btn-active" data-svc="openclaw" onclick="switchSvcMetric(this)">OpenClaw</button>
+        <button class="btn" data-svc="hermes" onclick="switchSvcMetric(this)">Hermes</button>
+        <button class="btn" data-svc="9router" onclick="switchSvcMetric(this)">9Router</button>
+      </div>
+    </div>
+    <div class="p-4 space-y-3" id="svc-metrics-content">
+      <div class="text-xs text-slate-500">Đang tải chỉ số dịch vụ...</div>
+    </div>
+  </section>
+
+  <!-- ═══ TIẾN TRÌNH HÀNG ĐẦU ═══ -->
+  <section class="card overflow-hidden">
+    <div class="p-4 border-b border-slate-800">
+      <h2 class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Tiến Trình Hàng Đầu</h2>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm table-hover">
+        <thead><tr class="text-[10px] text-slate-500 uppercase border-b border-slate-800">
+          <th class="p-3 text-left font-medium">PID</th>
+          <th class="p-3 text-left font-medium">Tên</th>
+          <th class="p-3 text-right font-medium">CPU%</th>
+          <th class="p-3 text-right font-medium">RAM MB</th>
+          <th class="p-3 text-left font-medium">Lệnh</th>
+        </tr></thead>
+        <tbody id="procs-body"></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<script>
+// ─── Biểu đồ ────────────────────────────────────────────────────
+let chart = null;
+function updateChart(data) {
+  const ctx = document.getElementById('chart-canvas');
+  if (!ctx) return;
+  const labels = data.map(p => { const d=new Date(p.t*1000); return d.toTimeString().slice(0,8); });
+  if (chart) chart.destroy();
+  chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {label:'CPU', data:data.map(p=>p.cpu), borderColor:'#22d3ee', backgroundColor:'rgba(34,211,238,0.06)', fill:true, tension:.4, pointRadius:0, borderWidth:1.5},
+        {label:'RAM', data:data.map(p=>p.memory), borderColor:'#a78bfa', backgroundColor:'rgba(167,139,250,0.06)', fill:true, tension:.4, pointRadius:0, borderWidth:1.5},
+        {label:'Đĩa', data:data.map(p=>p.disk), borderColor:'#fb923c', backgroundColor:'rgba(251,146,60,0.06)', fill:true, tension:.4, pointRadius:0, borderWidth:1.5},
+      ]
+    },
+    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}},
+      scales:{x:{display:false},y:{min:0,max:100,grid:{color:'rgba(255,255,255,0.03)'},ticks:{color:'#475569',font:{size:10}}}},
+      animation:{duration:300} }
+  });
+}
+
+// ─── Màu theo ngưỡng ─────────────────────────────────────────────
+function thrHex(v, w, c) { return v>=c?'#ef4444':v>=w?'#f59e0b':'#22c55e'; }
+function thrClass(v, w, c) { return v>=c?'text-red-400':v>=w?'text-amber-400':'text-emerald-400'; }
+function esc(s) { return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):''; }
+
+// ─── Lấy dữ liệu ──────────────────────────────────────────────────
+let failCount = 0;
+async function fetchData() {
+  try {
+    const res = await fetch('/api/all');
+    if (!res.ok) throw new Error(res.status);
+    const d = await res.json();
+    failCount = 0;
+    render(d);
+    setConn('Trực tuyến', true);
+  } catch(e) {
+    failCount++;
+    if (failCount > 3) setConn(`Lỗi (${failCount} lần)`, false);
+    else setConn(`Đang kết nối lại...`, false);
+  }
+}
+
+function setConn(text, ok) {
+  const el = document.getElementById('connection-state');
+  el.innerHTML = `<span class="w-2 h-2 rounded-full ${ok?'bg-emerald-400':'bg-red-400'} inline-block ${ok?'pulse-dot':''}"></span> ${text}`;
+  el.className = `${ok?'text-emerald-400':'text-red-400'} flex items-center gap-1`;
+}
+
+function render(d) {
+  const {system:sys, services:svcs, health} = d;
+  document.getElementById('last-sync').textContent = `Cập nhật: ${esc(sys.ts)}`;
+
+  // Sức khỏe
+  const hb = document.getElementById('health-badge');
+  const healthMap = { critical: 'NGUY HIỂM', warning: 'CẢNH BÁO', healthy: 'KHỎE' };
+  hb.textContent = healthMap[health.status] || health.status.toUpperCase();
+  hb.className = 'badge';
+  const hc = health.status==='critical'?'bg-red-500/20 text-red-400 border border-red-500/30':health.status==='warning'?'bg-amber-500/20 text-amber-400 border border-amber-500/30':'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30';
+  hb.classList.add(...hc.split(' '));
+  const ha = document.getElementById('health-alerts');
+  const allA = [...health.criticals, ...health.warnings];
+  ha.innerHTML = allA.length ? allA.map(a=>`<div class="flex items-center gap-2 text-sm"><span class="w-1.5 h-1.5 rounded-full ${health.criticals.includes(a)?'bg-red-400':'bg-amber-400'}"></span>${esc(a)}</div>`).join('') : '<div class="text-sm text-slate-400">Tất cả hệ thống hoạt động bình thường</div>';
+
+  // CPU
+  const cp = sys.cpu.percent;
+  document.getElementById('cpu-value').textContent = cp+'%';
+  document.getElementById('cpu-value').className = `text-lg font-bold mono ${thrClass(cp,60,80)}`;
+  document.getElementById('cpu-bar').style.width = cp+'%';
+  document.getElementById('cpu-bar').style.background = thrHex(cp,60,80);
+  document.getElementById('cpu-cores').textContent = `${sys.cpu.cores} nhân`;
+
+  // Per-core
+  const perCore = sys.cpu.per_core || [];
+  const perCoreEl = document.getElementById('cpu-per-core');
+  if (perCore.length > 0 && perCoreEl) {
+    perCoreEl.innerHTML = perCore.map((v, i) => {
+      const c = thrClass(v, 60, 80);
+      const h = thrHex(v, 60, 80);
+      return `<div class="bg-slate-800/50 rounded px-2 py-1 text-center">
+        <div class="text-[9px] text-slate-500 mono">CORE ${i}</div>
+        <div class="text-xs font-bold mono ${c}">${v}%</div>
+        <div class="progress-bar mt-0.5"><div class="progress-fill" style="width:${v}%;background:${h}"></div></div>
+      </div>`;
+    }).join('');
+  } else if (perCoreEl) {
+    perCoreEl.innerHTML = '';
+  }
+
+  // RAM
+  const mp = sys.memory.percent;
+  document.getElementById('mem-value').textContent = mp+'%';
+  document.getElementById('mem-value').className = `text-lg font-bold mono ${thrClass(mp,70,85)}`;
+  document.getElementById('mem-bar').style.width = mp+'%';
+  document.getElementById('mem-bar').style.background = thrHex(mp,70,85);
+  document.getElementById('mem-detail').textContent = `${sys.memory.used_gb}/${sys.memory.total_gb} GB`;
+
+  // Ổ đĩa
+  const dp = sys.disk.percent;
+  document.getElementById('disk-value').textContent = dp+'%';
+  document.getElementById('disk-value').className = `text-lg font-bold mono ${thrClass(dp,75,90)}`;
+  document.getElementById('disk-bar').style.width = dp+'%';
+  document.getElementById('disk-bar').style.background = thrHex(dp,75,90);
+  document.getElementById('disk-detail').textContent = `${sys.disk.used_gb}/${sys.disk.total_gb} GB`;
+
+  // Dịch vụ
+  const sb = document.getElementById('svc-body');
+  const running = Object.values(svcs).filter(s=>s.status==='running').length;
+  document.getElementById('services-count').textContent = `${running}/${Object.keys(svcs).length} đang chạy`;
+  sb.innerHTML = '';
+  for (const [k,s] of Object.entries(svcs)) {
+    const ok = s.status==='running';
+    sb.innerHTML += `<tr class="border-t border-slate-800">
+      <td class="p-3 font-medium text-white">${esc(s.name)}</td>
+      <td class="p-3"><span class="badge ${ok?'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30':'bg-red-500/20 text-red-400 border border-red-500/30'}">${ok?'Đang chạy':'Đã dừng'}</span></td>
+      <td class="p-3 text-slate-400 mono text-xs">${s.port}</td>
+      <td class="p-3 text-right mono text-slate-300">${s.cpu_percent}%</td>
+      <td class="p-3 text-right mono text-slate-300">${s.memory_mb>0?s.memory_mb+' MB':'—'}</td>
+      <td class="p-3 text-right mono text-slate-500 text-xs">${s.uptime||'—'}</td>
+      <td class="p-3 text-center">${ok?`<button class="btn" data-svc="${k}" onclick="restartSvc(this)">Khởi động lại</button>`:'<span class="text-slate-600 text-xs">—</span>'}</td></tr>`;
+  }
+
+  // Tiến trình
+  const pb = document.getElementById('procs-body');
+  pb.innerHTML = '';
+  (sys.top_processes||[]).forEach(p => {
+    pb.innerHTML += `<tr class="border-t border-slate-800">
+      <td class="p-3 text-slate-500 mono text-xs">${p.pid}</td>
+      <td class="p-3 font-medium text-slate-200">${esc(p.name)}</td>
+      <td class="p-3 text-right mono text-cyan-400">${p.cpu_percent}%</td>
+      <td class="p-3 text-right mono text-slate-300">${p.memory_mb||'—'}</td>
+      <td class="p-3 text-xs text-slate-500 mono truncate max-w-xs">${esc(p.cmd||'')}</td></tr>`;
+  });
+
+  // Biểu đồ
+  if (d.history && d.history.length > 1) updateChart(d.history);
+}
+
+// ─── Chỉ số dịch vụ (Chi tiết) ─────────────────────────────────────
+let svcMetricCharts = {};
+let currentSvcMetric = 'openclaw';
+let svcMetricHistories = { openclaw: [], hermes: [], '9router': [] };
+
+function switchSvcMetric(btn) {
+  document.querySelectorAll('#svc-metrics-tabs button').forEach(b => b.classList.remove('btn-active'));
+  btn.classList.add('btn-active');
+  currentSvcMetric = btn.dataset.svc;
+  renderSvcMetrics(currentSvcMetric);
+}
+
+async function fetchSvcMetrics() {
+  for (const key of Object.keys(svcMetricHistories)) {
+    try {
+      const r = await fetch(`/api/services/${key}/metrics`);
+      const d = await r.json();
+      svcMetricHistories[key] = d;
+    } catch (e) { /* bỏ qua */ }
+  }
+  renderSvcMetrics(currentSvcMetric);
+}
+
+function renderSvcMetrics(key) {
+  const d = svcMetricHistories[key];
+  const el = document.getElementById('svc-metrics-content');
+  if (!d) { el.innerHTML = '<div class="text-xs text-slate-500">Không có dữ liệu</div>'; return; }
+
+  const hist = d.history || {};
+  const rtSeries = (hist.response_times || []).map(p => ({ t: p.t, v: p.value }));
+  const memSeries = (hist.memory_samples || []).map(p => ({ t: p.t, v: p.value }));
+
+  const rtClass = d.response_time_ms != null && d.response_time_ms < 200 ? 'text-emerald-400' : 'text-amber-400';
+  const errClass = d.error_count_5min === 0 ? 'text-emerald-400' : 'text-red-400';
+  const warnClass = d.warning_count_5min === 0 ? 'text-emerald-400' : 'text-amber-400';
+  const restartClass = d.restart_count_24h === 0 ? 'text-emerald-400' : 'text-red-400';
+
+  el.innerHTML = `
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div class="bg-slate-800/50 rounded-lg p-3">
+        <div class="text-[10px] text-slate-500 uppercase">Độ Trễ</div>
+        <div class="text-lg font-bold mono ${rtClass}">${d.response_time_ms != null ? d.response_time_ms + ' ms' : '—'}</div>
+      </div>
+      <div class="bg-slate-800/50 rounded-lg p-3">
+        <div class="text-[10px] text-slate-500 uppercase">Lỗi (5 phút)</div>
+        <div class="text-lg font-bold mono ${errClass}">${d.error_count_5min}</div>
+      </div>
+      <div class="bg-slate-800/50 rounded-lg p-3">
+        <div class="text-[10px] text-slate-500 uppercase">Cảnh Báo (5 phút)</div>
+        <div class="text-lg font-bold mono ${warnClass}">${d.warning_count_5min}</div>
+      </div>
+      <div class="bg-slate-800/50 rounded-lg p-3">
+        <div class="text-[10px] text-slate-500 uppercase">Bộ Nhớ</div>
+        <div class="text-lg font-bold mono text-cyan-400">${d.memory_mb != null ? d.memory_mb + ' MB' : '—'}</div>
+      </div>
+      <div class="bg-slate-800/50 rounded-lg p-3">
+        <div class="text-[10px] text-slate-500 uppercase">Yêu Cầu (5 phút)</div>
+        <div class="text-lg font-bold mono text-slate-200">${d.request_count_5min}</div>
+      </div>
+      <div class="bg-slate-800/50 rounded-lg p-3">
+        <div class="text-[10px] text-slate-500 uppercase">Khởi Động Lại (24h)</div>
+        <div class="text-lg font-bold mono ${restartClass}">${d.restart_count_24h}</div>
+      </div>
+      <div class="bg-slate-800/50 rounded-lg p-3">
+        <div class="text-[10px] text-slate-500 uppercase">Tiến Trình Con</div>
+        <div class="text-lg font-bold mono text-slate-200">${d.child_process_count}</div>
+      </div>
+      <div class="bg-slate-800/50 rounded-lg p-3">
+        <div class="text-[10px] text-slate-500 uppercase">Thời Gian Chạy</div>
+        <div class="text-lg font-bold mono text-emerald-400 text-xs">${d.uptime || '—'}</div>
+      </div>
+    </div>
+    ${d.active_providers && d.active_providers.length > 0 ? `
+    <div class="mt-2">
+      <span class="text-[10px] text-slate-500 uppercase">Nhà Cung Cấp Đang Dùng:</span>
+      <div class="flex gap-2 mt-1 flex-wrap">
+        ${d.active_providers.map(p => `<span class="badge bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">${esc(p)}</span>`).join('')}
+      </div>
+    </div>` : ''}
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+      <div>
+        <div class="text-[10px] text-slate-500 uppercase mb-1">Thời Gian Phản Hồi (ms)</div>
+        <canvas id="chart-svc-rt" height="80"></canvas>
+      </div>
+      <div>
+        <div class="text-[10px] text-slate-500 uppercase mb-1">Bộ Nhớ (MB)</div>
+        <canvas id="chart-svc-mem" height="80"></canvas>
+      </div>
+    </div>`;
+
+  // Vẽ biểu đồ
+  renderSvcChart('chart-svc-rt', rtSeries, '#22d3ee', 'ms');
+  renderSvcChart('chart-svc-mem', memSeries, '#a78bfa', 'MB');
+}
+
+function renderSvcChart(canvasId, series, color, unit) {
+  const ctx = document.getElementById(canvasId);
+  if (!ctx) return;
+  const chart = svcMetricCharts[canvasId];
+  if (chart) chart.destroy();
+  const labels = series.map(p => { const d = new Date(p.t * 1000); return d.toTimeString().slice(0, 8); });
+  svcMetricCharts[canvasId] = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: color === '#22d3ee' ? 'Độ Trễ' : 'Bộ Nhớ',
+        data: series.map(p => p.v),
+        borderColor: color,
+        backgroundColor: color + '10',
+        fill: true, tension: 0.3, pointRadius: 0, borderWidth: 1.5
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { display: false },
+        y: { min: 0, grid: { color: 'rgba(255,255,255,0.03)' }, ticks: { color: '#475569', font: { size: 10 }, callback: v => v + unit } }
+      },
+      animation: { duration: 300 }
+    }
+  });
+}
+
+// Tự cập nhật chỉ số dịch vụ mỗi 30 giây
+fetchSvcMetrics();
+setInterval(fetchSvcMetrics, 30000);
+
+// ─── Khởi động lại dịch vụ ─────────────────────────────────────────
+async function restartSvc(btn) {
+  const svc = btn.dataset.svc;
+  btn.textContent = '...'; btn.classList.add('loading');
+  try {
+    const r = await fetch(`/api/services/${svc}/restart`, {method:'POST'});
+    const j = await r.json();
+    btn.textContent = j.status==='ok'?'Xong':'Lỗi';
+  } catch(e) { btn.textContent = 'Lỗi'; }
+  setTimeout(()=>{btn.textContent='Khởi động lại';btn.classList.remove('loading');}, 2500);
+}
+
+// ─── WebSocket Nhật Ký ──────────────────────────────────────────────
+let ws = null;
+const logOutput = document.getElementById('log-output');
+const logSource = document.getElementById('log-source');
+const wsState = document.getElementById('ws-state');
+const maxLogLines = 500;
+
+function toggleLog() {
+  const btn = document.getElementById('log-connect');
+  if (ws && ws.readyState <= 1) {
+    ws.close(); btn.textContent = 'Kết Nối'; btn.classList.add('btn-active'); return;
+  }
+  const src = logSource.value;
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}/ws/logs`);
+  btn.textContent = '...';
+  ws.onopen = () => {
+    ws.send(JSON.stringify({source: src, follow: true}));
+    wsState.textContent = `đã kết nối · ${src}`;
+    wsState.className = 'text-[10px] text-emerald-400 mono';
+    btn.textContent = 'Ngắt Kết Nối';
+    btn.classList.remove('btn-active');
+    btn.classList.add('border-emerald-600');
+  };
+  ws.onmessage = (e) => {
+    const line = e.data;
+    while (logOutput.children.length > maxLogLines) logOutput.removeChild(logOutput.firstChild);
+    const div = document.createElement('div');
+    div.className = 'fade-in';
+    const lower = line.toLowerCase();
+    if (lower.includes('error') || lower.includes('fail') || lower.includes('critical')) div.className += ' log-error';
+    else if (lower.includes('warn')) div.className += ' log-warn';
+    else if (lower.includes('started') || lower.includes('active') || lower.includes('running')) div.className += ' log-ok';
+    else div.className += ' text-slate-300';
+    div.textContent = line;
+    logOutput.appendChild(div);
+    logOutput.scrollTop = logOutput.scrollHeight;
+  };
+  ws.onclose = () => {
+    wsState.textContent = 'ngắt kết nối';
+    wsState.className = 'text-[10px] text-slate-500 mono';
+    btn.textContent = 'Kết Nối';
+    btn.classList.add('btn-active');
+    btn.classList.remove('border-emerald-600');
+  };
+  ws.onerror = () => { ws.close(); };
+}
+
+function clearLogs() {
+  logOutput.innerHTML = '<div class="text-slate-500 text-xs">Đã xóa</div>';
+}
+
+// Tự kết nối lại khi đổi nguồn
+logSource.addEventListener('change', () => {
+  if (ws && ws.readyState <= 1) { ws.close(); setTimeout(toggleLog, 500); }
+});
+
+// ─── Khởi động ────────────────────────────────────────────────────
+fetchData();
+setInterval(fetchData, 3000);
+</script>
+</body>
+</html>
