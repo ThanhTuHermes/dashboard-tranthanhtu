@@ -7,12 +7,12 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Depends, status
+from fastapi import FastAPI, Response, WebSocket, WebSocketDisconnect, Depends, status, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 # Import Services
-from services.config import SERVICES, MAX_HISTORY, SYSTEM_INTERVAL, MONITOR_INTERVAL, DASHBOARD_USERNAME, DASHBOARD_PASSWORD, DASHBOARD_API_KEY
+from services.config import SERVICES, MAX_HISTORY, SYSTEM_INTERVAL, MONITOR_INTERVAL, DASHBOARD_USERNAME
 from services.auth import SESSION_TOKEN, verify_credentials, verify_token, verify_websocket
 from services.system import get_system_info
 from services.monitor import ServiceMonitor, check_service_status_async, compute_health
@@ -42,6 +42,9 @@ cached_dashboard_data = {
 history = deque(maxlen=MAX_HISTORY)
 monitors: dict[str, ServiceMonitor] = {}
 
+# Shared HTTP client initialized in lifespan
+http_client: httpx.AsyncClient | None = None
+
 async def _sys_run_loop():
     """Background loop collecting system metrics."""
     while True:
@@ -70,53 +73,53 @@ async def _sys_run_loop():
         await asyncio.sleep(SYSTEM_INTERVAL)
 
 async def _svc_run_loop():
-    """Background loop collecting service status and deep metrics."""
-    async with httpx.AsyncClient(timeout=4.0) as client:
-        while True:
-            try:
-                # 1. Update service monitors (response time & memory samples)
-                for mon in monitors.values():
-                    try:
-                        await mon.collect(client)
-                    except Exception as e:
-                        logger.debug(f"Failed to collect detailed metrics for service {mon.key}: {e}")
-                
-                # 2. Update service live status (PIDs, CPU, etc.)
-                tasks = {k: check_service_status_async(k) for k in SERVICES}
-                services_states = await asyncio.gather(*tasks.values())
-                services_dict = dict(zip(tasks.keys(), services_states))
-                
-                cached_dashboard_data["services"] = services_dict
-                
-                if cached_dashboard_data["system"]:
-                    cached_dashboard_data["health"] = compute_health(
-                        cached_dashboard_data["system"], 
-                        cached_dashboard_data["services"]
-                    )
-            except Exception as e:
-                logger.error(f"Error in background services status collector: {e}")
-            await asyncio.sleep(MONITOR_INTERVAL)
+    """Background loop collecting service status and deep metrics using a shared HTTP client."""
+    while True:
+        try:
+            # 1. Update service monitors (response time & memory samples)
+            for mon in monitors.values():
+                try:
+                    await mon.collect(http_client)
+                except Exception as e:
+                    logger.debug(f"Failed to collect detailed metrics for service {mon.key}: {e}")
+            
+            # 2. Update service live status (PIDs, CPU, etc.) using shared client
+            tasks = {k: check_service_status_async(k, http_client) for k in SERVICES}
+            services_states = await asyncio.gather(*tasks.values())
+            services_dict = dict(zip(tasks.keys(), services_states))
+            
+            cached_dashboard_data["services"] = services_dict
+            
+            if cached_dashboard_data["system"]:
+                cached_dashboard_data["health"] = compute_health(
+                    cached_dashboard_data["system"], 
+                    cached_dashboard_data["services"]
+                )
+        except Exception as e:
+            logger.error(f"Error in background services status collector: {e}")
+        await asyncio.sleep(MONITOR_INTERVAL)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # --- Startup ---
-    logger.info("=" * 60)
+    global http_client
+    logger.info("Initializing HTTP-only secure session credentials...")
     logger.info(f"Dashboard Auth Username: {DASHBOARD_USERNAME}")
-    logger.info(f"Dashboard Auth Password: {DASHBOARD_PASSWORD}")
-    logger.info(f"Dashboard Auth API Key:  {DASHBOARD_API_KEY}")
-    logger.info(f"Generated Session Token: {SESSION_TOKEN}")
-    logger.info("=" * 60)
-    logger.info("Starting Dashboard Monitor services...")
+    logger.info("Dashboard Auth Password: [PROTECTED]")
+    logger.info("Dashboard Auth API Key:  [PROTECTED]")
+    
+    # Initialize shared HTTP Client
+    http_client = httpx.AsyncClient(timeout=4.0)
+
     for key, svc in SERVICES.items():
-        systemd = svc.get("systemd") or (key if key != "openclaw" else None)
-        monitors[key] = ServiceMonitor(key, svc["port"], systemd)
+        monitors[key] = ServiceMonitor(key, svc["port"], svc.get("systemd"))
     
     # Pre-populate cache once so the app is instantly usable
     try:
         initial_sys = await asyncio.to_thread(get_system_info, force_refresh=True)
         cached_dashboard_data["system"] = initial_sys
         
-        tasks = {k: check_service_status_async(k) for k in SERVICES}
+        tasks = {k: check_service_status_async(k, http_client) for k in SERVICES}
         services_states = await asyncio.gather(*tasks.values())
         cached_dashboard_data["services"] = dict(zip(tasks.keys(), services_states))
         
@@ -138,6 +141,10 @@ async def lifespan(app: FastAPI):
     logger.info("Stopping Dashboard Monitor background tasks...")
     sys_task.cancel()
     svc_task.cancel()
+    
+    # Close HTTP Client
+    await http_client.aclose()
+    
     await asyncio.gather(sys_task, svc_task, return_exceptions=True)
     logger.info("Dashboard Monitor stopped.")
 
@@ -153,10 +160,19 @@ if os.path.exists("static"):
 # --- HTTP ROUTES ---
 
 @app.get("/", response_class=HTMLResponse)
-async def dashboard_ui(request: Request, username: str = Depends(verify_credentials)):
-    """Serves the dashboard HTML page with the injected current session token."""
-    html_content = DASHBOARD_HTML.replace("{{SESSION_TOKEN}}", SESSION_TOKEN)
-    return HTMLResponse(html_content)
+async def dashboard_ui(username: str = Depends(verify_credentials)):
+    """Serves the dashboard HTML page and sets an HTTP-only secure session cookie."""
+    response = HTMLResponse(DASHBOARD_HTML)
+    # Set secure HTTP-only Cookie for browser-native authentication flow
+    response.set_cookie(
+        key="session_id",
+        value=SESSION_TOKEN,
+        httponly=True,
+        samesite="lax",
+        max_age=86400, # 24 hours
+        path="/"
+    )
+    return response
 
 
 @app.get("/api/all", dependencies=[Depends(verify_token)])
@@ -218,17 +234,15 @@ async def restart_service(name: str):
 @app.websocket("/ws/logs")
 async def ws_logs(ws: WebSocket):
     """Secured WebSocket endpoint to stream logs in real-time."""
-    await ws.accept()
-    
-    # 1. Verify credentials via WebSocket handshake query param or first auth message
+    # 1. Verify credentials BEFORE accepting the WebSocket connection
     if not await verify_websocket(ws):
-        logger.warning("Rejected unauthenticated WebSocket log request.")
-        try:
-            await ws.send_text("Error: Unauthorized")
-            await ws.close(code=status.WS_1008_POLICY_VIOLATION)
-        except Exception:
-            pass
-        return
+        logger.warning("Rejected unauthenticated WebSocket log request before acceptance.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized WebSocket connection request"
+        )
+        
+    await ws.accept()
         
     try:
         # Wait for the client setup message (contains source and follow options)
@@ -247,12 +261,6 @@ async def ws_logs(ws: WebSocket):
 
 if __name__ == "__main__":
     import uvicorn
-    # Log the security credentials to terminal at startup for ease of discovery
-    logger.info("=" * 60)
-    logger.info(f"Dashboard Auth Username: {DASHBOARD_USERNAME}")
-    logger.info(f"Dashboard Auth Password: {DASHBOARD_PASSWORD}")
-    logger.info(f"Dashboard Auth API Key:  {DASHBOARD_API_KEY}")
-    logger.info(f"Generated Session Token: {SESSION_TOKEN}")
-    logger.info("=" * 60)
-    
+    # Log the safety credentials info
+    logger.info("Starting production dashboard server...")
     uvicorn.run("app:app", host="0.0.0.0", port=3333, reload=False)

@@ -189,7 +189,6 @@ body{background:#080c14;color:#e2e8f0;min-height:100vh}
 </div>
 
 <script>
-const sessionToken = '{{SESSION_TOKEN}}';
 // ─── Biểu đồ ────────────────────────────────────────────────────
 let chart = null;
 function updateChart(data) {
@@ -222,7 +221,7 @@ function esc(s) { return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').
 let failCount = 0;
 async function fetchData() {
   try {
-    const res = await fetch('/api/all?token=' + sessionToken);
+    const res = await fetch('/api/all');
     if (!res.ok) throw new Error(res.status);
     const d = await res.json();
     failCount = 0;
@@ -345,7 +344,7 @@ function switchSvcMetric(btn) {
 async function fetchSvcMetrics() {
   for (const key of Object.keys(svcMetricHistories)) {
     try {
-      const r = await fetch(`/api/services/${key}/metrics?token=${sessionToken}`);
+      const r = await fetch(`/api/services/${key}/metrics`);
       const d = await r.json();
       svcMetricHistories[key] = d;
     } catch (e) { /* bỏ qua */ }
@@ -464,7 +463,7 @@ async function restartSvc(btn) {
   const svc = btn.dataset.svc;
   btn.textContent = '...'; btn.classList.add('loading');
   try {
-    const r = await fetch(`/api/services/${svc}/restart?token=${sessionToken}`, {method:'POST'});
+    const r = await fetch(`/api/services/${svc}/restart`, {method:'POST'});
     const j = await r.json();
     btn.textContent = j.status==='ok'?'Xong':'Lỗi';
   } catch(e) { btn.textContent = 'Lỗi'; }
@@ -485,7 +484,7 @@ function toggleLog() {
   }
   const src = logSource.value;
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  ws = new WebSocket(`${proto}//${location.host}/ws/logs?token=${sessionToken}`);
+  ws = new WebSocket(`${proto}//${location.host}/ws/logs`);
   btn.textContent = '...';
   ws.onopen = () => {
     ws.send(JSON.stringify({source: src, follow: true}));

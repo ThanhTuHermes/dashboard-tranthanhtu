@@ -6,7 +6,11 @@ from services.config import LOG_SOURCES
 logger = logging.getLogger("dashboard.logging")
 
 async def fetch_logs_async(source: str, lines: int = 50) -> list:
-    """Fetch logs asynchronously using journalctl."""
+    """Fetch logs asynchronously using journalctl with validation."""
+    if source not in LOG_SOURCES:
+        logger.warning(f"Rejected invalid log source lookup request: {source}")
+        return [f"Error: Invalid log source '{source}'"]
+
     try:
         unit = LOG_SOURCES.get(source)
         cmd = ["/usr/bin/journalctl", "-n", str(lines), "--no-pager", "-o", "short-iso"]
@@ -34,7 +38,13 @@ async def fetch_logs_async(source: str, lines: int = 50) -> list:
         return [f"Error fetching logs: {e}"]
 
 async def stream_logs_websocket(websocket: WebSocket, source: str, follow: bool = True):
-    """Streams systemd/journalctl logs directly to the WebSocket client."""
+    """Streams systemd/journalctl logs directly to the WebSocket client with ping/keepalive check."""
+    if source not in LOG_SOURCES:
+        logger.warning(f"Rejected invalid log source WS request: {source}")
+        await websocket.send_text(f"Error: Invalid log source '{source}'")
+        await websocket.close()
+        return
+
     proc = None
     try:
         # 1. Send recent 20 log lines first
@@ -58,16 +68,22 @@ async def stream_logs_websocket(websocket: WebSocket, source: str, follow: bool 
         )
 
         while True:
-            # Check for WebSocket disconnect during wait
-            line_bytes = await asyncio.wait_for(proc.stdout.readline(), timeout=30.0)
-            if not line_bytes:
-                break
-            text = line_bytes.decode("utf-8", errors="replace").rstrip()
-            await websocket.send_text(text)
+            try:
+                # Read line with timeout
+                line_bytes = await asyncio.wait_for(proc.stdout.readline(), timeout=30.0)
+                if not line_bytes:
+                    break
+                text = line_bytes.decode("utf-8", errors="replace").rstrip()
+                await websocket.send_text(text)
+            except asyncio.TimeoutError:
+                # Connection is idle; send a ping frame to verify client is still connected
+                try:
+                    await websocket.send_json({"ping": True})
+                except Exception:
+                    # Connection is dead; clean up and break loop
+                    logger.debug("WebSocket client disconnected (heartbeat ping failed).")
+                    break
 
-    except asyncio.TimeoutError:
-        # Keepalive/timeout to check if connection is still active
-        pass
     except Exception as e:
         logger.debug(f"Log streaming loop terminated: {e}")
     finally:

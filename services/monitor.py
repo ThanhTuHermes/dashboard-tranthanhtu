@@ -222,8 +222,8 @@ class ServiceMonitor:
         }
 
 
-async def check_service_status_async(key: str) -> dict:
-    """Inspects a service immediately and returns its live state."""
+async def check_service_status_async(key: str, http_client: httpx.AsyncClient) -> dict:
+    """Inspects a service immediately and returns its live state using a shared AsyncClient."""
     svc = SERVICES[key]
     result = {
         "name": svc["name"], 
@@ -269,9 +269,8 @@ async def check_service_status_async(key: str) -> dict:
 
     # Check HTTP endpoint status
     try:
-        async with httpx.AsyncClient(timeout=1.5) as c:
-            r = await c.get(f"http://localhost:{svc['port']}/")
-            result["http_status"] = r.status_code
+        r = await http_client.get(f"http://localhost:{svc['port']}/", timeout=1.5)
+        result["http_status"] = r.status_code
     except Exception as e:
         logger.debug(f"HTTP connection failed to http://localhost:{svc['port']}/ : {e}")
 
